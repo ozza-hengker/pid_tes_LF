@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulasi PID Line Tracer - Ozza</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .slider-custom {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 5px;
+            background: #d1d5db;
+            outline: none;
+        }
+        .slider-custom::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            transition: background .15s ease-in-out;
+        }
+        .slider-custom::-webkit-slider-thumb:hover { background: #2563eb; }
+        canvas {
+            image-rendering: -moz-crisp-edges;
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: crisp-edges;
+            image-rendering: pixelated;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-slate-900 text-white p-4 shadow-md z-10">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div>
+                <h1 class="text-2xl font-bold flex items-center gap-2">
+                    <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
+                    Simulasi PID Line Tracer
+                </h1>
+                <p class="text-xs text-slate-400 mt-1">Dibuat khusus untuk Ozza di Malang | Robot Ichibot Simulation</p>
+            </div>
+            <div class="flex gap-3">
+                <button id="btn-reset" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-semibold transition">Reset Posisi</button>
+                <button id="btn-play" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-semibold transition shadow-[0_0_10px_rgba(59,130,246,0.5)]">Jalankan / Pause</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 w-full max-w-7xl mx-auto p-4 flex flex-col lg:flex-row gap-6">
+        
+        <!-- Canvas Area -->
+        <div class="flex-1 flex flex-col bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+            <div class="relative w-full aspect-[4/3] bg-white rounded-lg overflow-hidden border border-gray-100" id="canvas-container">
+                <!-- Offscreen canvas for track reading (hidden) -->
+                <canvas id="trackCanvas" width="800" height="600" class="hidden"></canvas>
+                <!-- Main visible canvas -->
+                <canvas id="simCanvas" width="800" height="600" class="w-full h-full object-contain cursor-crosshair"></canvas>
+                
+                <!-- Status Overlay -->
+                <div class="absolute top-4 left-4 bg-white/90 backdrop-blur text-xs p-3 rounded-lg shadow-sm border border-gray-200 pointer-events-none">
+                    <div class="font-bold text-gray-700 mb-1">Status Sensor</div>
+                    <div class="flex gap-1" id="sensor-display">
+                        <!-- Sensor indicators will be injected here -->
+                    </div>
+                    <div class="mt-2 text-gray-600">
+                        Error: <span id="lbl-error" class="font-mono font-bold">0</span>
+                    </div>
+                </div>
+            </div>
+            <p class="text-xs text-gray-400 mt-3 text-center">Garis hitam adalah lintasan. Titik kuning/merah adalah array sensor. Robot mendeteksi garis menggunakan sensor, menghitung error, dan menyesuaikan kecepatan motor kiri/kanan.</p>
+        </div>
+
+        <!-- Controls Area -->
+        <div class="w-full lg:w-80 flex flex-col gap-4">
+            
+            <!-- PID Tuning Panel -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+                <h2 class="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Tuning PID</h2>
+                
+                <!-- Kp -->
+                <div class="mb-5">
+                    <div class="flex justify-between items-end mb-1">
+                        <label class="text-sm font-semibold text-gray-700">Proportional (Kp)</label>
+                        <input type="number" id="num-kp" class="w-16 text-right text-sm border rounded px-1" value="5.0" step="0.1">
+                    </div>
+                    <input type="range" id="slider-kp" min="0" max="20" step="0.1" value="5.0" class="slider-custom">
+                    <p class="text-[10px] text-gray-500 mt-1 leading-tight">Merespon error saat ini. Terlalu besar = robot osilasi (goyang). Terlalu kecil = robot lambat belok.</p>
+                </div>
+
+                <!-- Kd -->
+                <div class="mb-5">
+                    <div class="flex justify-between items-end mb-1">
+                        <label class="text-sm font-semibold text-gray-700">Derivative (Kd)</label>
+                        <input type="number" id="num-kd" class="w-16 text-right text-sm border rounded px-1" value="10.0" step="0.1">
+                    </div>
+                    <input type="range" id="slider-kd" min="0" max="50" step="0.1" value="10.0" class="slider-custom">
+                    <p class="text-[10px] text-gray-500 mt-1 leading-tight">Meredam osilasi dari Kp dengan melihat laju perubahan error. Bikin pergerakan lebih 'smooth'.</p>
+                </div>
+
+                <!-- Ki -->
+                <div class="mb-5">
+                    <div class="flex justify-between items-end mb-1">
+                        <label class="text-sm font-semibold text-gray-700">Integral (Ki)</label>
+                        <input type="number" id="num-ki" class="w-16 text-right text-sm border rounded px-1" value="0.00" step="0.01">
+                    </div>
+                    <input type="range" id="slider-ki" min="0" max="1" step="0.01" value="0.00" class="slider-custom">
+                    <p class="text-[10px] text-gray-500 mt-1 leading-tight">Mengatasi error kecil yang tersisa. Hati-hati, nilai terlalu besar bikin robot spin out (Integral Windup).</p>
+                </div>
+
+                <!-- Base Speed -->
+                <div class="mb-2">
+                    <div class="flex justify-between items-end mb-1">
+                        <label class="text-sm font-semibold text-gray-700">Kecepatan Dasar</label>
+                        <span id="lbl-speed" class="text-sm font-mono">40</span>
+                    </div>
+                    <input type="range" id="slider-speed" min="10" max="150" step="1" value="40" class="slider-custom">
+                </div>
+            </div>
+
+            <!-- Telemetry Panel -->
+            <div class="bg-slate-800 text-white p-5 rounded-xl shadow-sm border border-slate-700 flex-1">
+                <h2 class="text-lg font-bold mb-4 border-b border-slate-600 pb-2">Telemetri</h2>
+                
+                <div class="space-y-3 font-mono text-sm">
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">P Term:</span>
+                        <span id="tel-p">0.00</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">I Term:</span>
+                        <span id="tel-i">0.00</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">D Term:</span>
+                        <span id="tel-d">0.00</span>
+                    </div>
+                    <div class="flex justify-between border-t border-slate-600 pt-2">
+                        <span class="text-slate-400">Output (Turn):</span>
+                        <span id="tel-out" class="font-bold text-blue-400">0.00</span>
+                    </div>
+                    <div class="mt-4">
+                        <div class="text-xs text-slate-400 mb-1">Motor Kiri vs Kanan</div>
+                        <div class="flex h-4 bg-slate-700 rounded overflow-hidden">
+                            <div id="bar-left" class="bg-green-500 w-1/2 transition-all duration-75"></div>
+                            <div class="w-px bg-white/20"></div>
+                            <div id="bar-right" class="bg-green-500 w-1/2 transition-all duration-75"></div>
+                        </div>
+                        <div class="flex justify-between text-xs mt-1 text-slate-400">
+                            <span id="tel-m-left">0</span>
+                            <span id="tel-m-right">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // --- KONFIGURASI SIMULASI ---
+        const CANVAS_WIDTH = 800;
+        const CANVAS_HEIGHT = 600;
+        const FPS = 60;
+        const dt = 1 / FPS;
+
+        // Elements
+        const simCanvas = document.getElementById('simCanvas');
+        const simCtx = simCanvas.getContext('2d');
+        const trackCanvas = document.getElementById('trackCanvas');
+        const trackCtx = trackCanvas.getContext('2d', { willReadFrequently: true });
+        
+        let trackPixelData = null; // Menyimpan data pixel lintasan untuk performa deteksi
+        
+        // Status Simulasi
+        let isRunning = false;
+        let animationId;
+
+        // Variabel PID
+        let Kp = 5.0;
+        let Ki = 0.0;
+        let Kd = 10.0;
+        
+        // State PID Robot
+        let lastError = 0;
+        let integral = 0;
+        let pTerm = 0;
+        let iTerm = 0;
+        let dTerm = 0;
+        let turnOutput = 0;
+
+        // Spesifikasi Robot (Berdasarkan Ichibot)
+        const robot = {
+            x: 180,           // Posisi awal X
+            y: 400,           // Posisi awal Y
+            theta: -Math.PI/2, // Menghadap ke atas
+            baseSpeed: 40,
+            wheelBase: 40,    // Jarak antar roda (lebar)
+            sensorDist: 45,   // Jarak roda ke ujung array sensor
+            
+            // Konfigurasi 8 Sensor
+            numSensors: 8,
+            sensorSpacing: 8, // Jarak antar sensor pada array
+            sensorWeights: [-8, -4, -2, -1, 1, 2, 4, 8], // Bobot error tiap sensor
+            sensorsRaw: [0,0,0,0,0,0,0,0], // Pembacaan sensor (1 = kena garis, 0 = putih)
+            
+            mLeft: 0,
+            mRight: 0
+        };
+
+        const START_POS = { x: 180, y: 450, theta: -Math.PI/2 - 0.2 }; // Sedikit miring untuk test koreksi
+
+        // --- MENGGAMBAR LINTASAN (TRACK) ---
+        function drawTrackPath(ctx) {
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = 18; // Ketebalan garis hitam (~1.8cm di dunia nyata)
+            ctx.strokeStyle = '#000000'; // Warna garis hitam pekat
+            
+            ctx.beginPath();
+            // Lintasan Kompleks dengan belokan tajam dan halus
+            ctx.moveTo(180, 450);
+            ctx.lineTo(180, 150);
+            ctx.arc(280, 150, 100, Math.PI, Math.PI*1.5);
+            ctx.lineTo(550, 50);
+            ctx.arc(650, 150, 100, Math.PI*1.5, Math.PI*2);
+            ctx.lineTo(750, 400);
+            ctx.arc(650, 500, 100, 0, Math.PI/2);
+            ctx.lineTo(400, 600);
+            // S-Curve (Chicane)
+            ctx.bezierCurveTo(300, 600, 350, 450, 250, 450);
+            ctx.lineTo(180, 450);
+            ctx.stroke();
+            ctx.closePath();
+        }
+
+        // Cache lintasan ke offscreen canvas untuk deteksi cepat
+        function initTrack() {
+            // Fill putih
+            trackCtx.fillStyle = '#FFFFFF';
+            trackCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            // Gambar Garis Hitam
+            drawTrackPath(trackCtx);
+            // Ambil data pixel sekali saja! (Sangat cepat O(1) saat simulasi)
+            trackPixelData = trackCtx.getImageData(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT).data;
+        }
+
+        // --- LOGIKA SENSOR ---
+        // Cek apakah koordinat x,y berada di atas garis hitam
+        function isBlackLine(x, y) {
+            x = Math.round(x);
+            y = Math.round(y);
+            if (x < 0 || x >= CANVAS_WIDTH || y < 0 || y >= CANVAS_HEIGHT) return false;
+            // Ambil index pixel (Red channel cukup karena grayscale)
+            let index = (y * CANVAS_WIDTH + x) * 4;
+            return trackPixelData[index] < 128; // Jika nilai merah < 128, berarti warnanya gelap
+        }
+
+        // --- UPDATE SIMULASI ---
+        function updateSimulation() {
+            if (!isRunning) return;
+
+            // 1. Hitung Posisi Array Sensor
+            let currentError = 0;
+            let activeSensors = 0;
+            
+            // Posisi tengah array sensor di depan robot
+            let sensorCx = robot.x + robot.sensorDist * Math.cos(robot.theta);
+            let sensorCy = robot.y + robot.sensorDist * Math.sin(robot.theta);
+
+            // Hitung Error berdasarkan pembacaan ke-8 sensor
+            for (let i = 0; i < robot.numSensors; i++) {
+                // Posisi relatif sensor dari tengah array (menyamping)
+                let offset = (i - (robot.numSensors - 1) / 2) * robot.sensorSpacing;
+                
+                // Koordinat dunia dari sensor individu (diputar sesuai heading robot)
+                // Menggunakan rumus rotasi 2D offset 90 derajat
+                let sx = sensorCx - offset * Math.sin(robot.theta);
+                let sy = sensorCy + offset * Math.cos(robot.theta);
+
+                let onLine = isBlackLine(sx, sy);
+                robot.sensorsRaw[i] = onLine ? 1 : 0;
+                
+                if (onLine) {
+                    currentError += robot.sensorWeights[i];
+                    activeSensors++;
+                }
+            }
+
+            // 2. Logika Error Utama & Hilang Garis (Line Lost)
+            if (activeSensors > 0) {
+                // Rata-rata error berbobot
+                currentError = currentError / activeSensors;
+            } else {
+                // HILANG GARIS! Gunakan memori error terakhir untuk terus berbelok
+                if (lastError > 0) {
+                    currentError = 15; // Berbelok tajam ke kanan
+                } else if (lastError < 0) {
+                    currentError = -15; // Berbelok tajam ke kiri
+                } else {
+                    currentError = 0;
+                }
+            }
+
+            // 3. Kalkulasi PID
+            pTerm = Kp * currentError;
+            
+            // Integral dengan Windup Guard (Mencegah akumulasi berlebihan)
+            integral += currentError * dt;
+            integral = Math.max(-50, Math.min(50, integral)); 
+            iTerm = Ki * integral;
+
+            dTerm = Kd * ((currentError - lastError) / dt);
+            
+            turnOutput = pTerm + iTerm + dTerm;
+            lastError = currentError;
+
+            // 4. Hitung Kecepatan Motor (Differential Drive)
+            robot.mLeft = robot.baseSpeed + turnOutput;
+            robot.mRight = robot.baseSpeed - turnOutput;
+
+            // Limitasi kecepatan motor maksimum dan minimum
+            robot.mLeft = Math.max(-20, Math.min(150, robot.mLeft));
+            robot.mRight = Math.max(-20, Math.min(150, robot.mRight));
+
+            // 5. Kinematika Pergerakan (Update Posisi)
+            // Kecepatan linear rata-rata
+            let v = (robot.mLeft + robot.mRight) / 2;
+            // Kecepatan sudut (omega)
+            let omega = (robot.mLeft - robot.mRight) / robot.wheelBase;
+
+            robot.theta += omega * dt;
+            robot.x += v * Math.cos(robot.theta) * dt;
+            robot.y += v * Math.sin(robot.theta) * dt;
+
+            // Cek Boundary (Kalau keluar kanvas, reset)
+            if (robot.x < 0 || robot.x > CANVAS_WIDTH || robot.y < 0 || robot.y > CANVAS_HEIGHT) {
+                resetRobot();
+            }
+
+            updateTelemetryUI(currentError);
+        }
+
+        // --- MENGGAMBAR GRAFIS ---
+        function draw() {
+            // Bersihkan frame sebelumnya
+            simCtx.fillStyle = '#f8fafc'; // background kanvas sedikit abu-abu
+            simCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+            // 1. Gambar Lintasan dari fungsi
+            drawTrackPath(simCtx);
+
+            // 2. Gambar Robot Ichibot
+            simCtx.save();
+            simCtx.translate(robot.x, robot.y);
+            simCtx.rotate(robot.theta);
+
+            // Bayangan Robot
+            simCtx.shadowColor = 'rgba(0,0,0,0.3)';
+            simCtx.shadowBlur = 10;
+            simCtx.shadowOffsetY = 5;
+
+            // Body Tengah (PCB)
+            simCtx.fillStyle = '#1e293b'; // Warna PCB Hitam/Abu Tua
+            simCtx.beginPath();
+            simCtx.moveTo(-15, -15);
+            simCtx.lineTo(20, -10);
+            simCtx.lineTo(robot.sensorDist, 0); // Maju ke jangkar
+            simCtx.lineTo(20, 10);
+            simCtx.lineTo(-15, 15);
+            simCtx.closePath();
+            simCtx.fill();
+
+            // OLED Screen
+            simCtx.fillStyle = '#38bdf8'; // Layar biru nyala
+            simCtx.fillRect(0, -6, 10, 12);
+
+            // LED Hijau menyala
+            simCtx.shadowColor = '#4ade80';
+            simCtx.shadowBlur = 15;
+            simCtx.fillStyle = '#4ade80';
+            simCtx.beginPath();
+            simCtx.arc(10, 8, 3, 0, Math.PI*2);
+            simCtx.fill();
+            simCtx.shadowBlur = 0; // Reset shadow
+
+            // Roda Kiri
+            simCtx.fillStyle = '#333'; // Ban karet
+            simCtx.fillRect(-15, -robot.wheelBase/2 - 6, 30, 12);
+            // Roda Kanan
+            simCtx.fillStyle = '#333';
+            simCtx.fillRect(-15, robot.wheelBase/2 - 6, 30, 12);
+
+            // Jangkar Depan (Sensor Array Bracket)
+            simCtx.fillStyle = '#334155'; // Grey gelap
+            simCtx.beginPath();
+            simCtx.arc(robot.sensorDist, 0, 30, Math.PI*1.2, Math.PI*0.8, true);
+            simCtx.arc(robot.sensorDist, 0, 20, Math.PI*0.8, Math.PI*1.2, false);
+            simCtx.closePath();
+            simCtx.fill();
+
+            // Titik-titik Sensor
+            for (let i = 0; i < robot.numSensors; i++) {
+                let offset = (i - (robot.numSensors - 1) / 2) * robot.sensorSpacing;
+                
+                // Jika sensor kena hitam, warnai merah (aktif), kalau tidak kuning/putih
+                simCtx.fillStyle = robot.sensorsRaw[i] ? '#ef4444' : '#fef08a';
+                simCtx.beginPath();
+                // Gambar sensor pada array depan
+                simCtx.arc(robot.sensorDist, offset, 2, 0, Math.PI*2);
+                simCtx.fill();
+            }
+
+            simCtx.restore();
+        }
+
+        // --- UPDATE UI & BINDING ---
+        function updateTelemetryUI(error) {
+            document.getElementById('tel-p').innerText = pTerm.toFixed(2);
+            document.getElementById('tel-i').innerText = iTerm.toFixed(2);
+            document.getElementById('tel-d').innerText = dTerm.toFixed(2);
+            document.getElementById('tel-out').innerText = turnOutput.toFixed(2);
+            
+            document.getElementById('lbl-error').innerText = error.toFixed(2);
+
+            let ml = Math.round(robot.mLeft);
+            let mr = Math.round(robot.mRight);
+            document.getElementById('tel-m-left').innerText = ml;
+            document.getElementById('tel-m-right').innerText = mr;
+
+            // Update Progress Bar Motor
+            const maxMotor = 150;
+            let percentL = Math.max(0, Math.min(100, (ml / maxMotor) * 100));
+            let percentR = Math.max(0, Math.min(100, (mr / maxMotor) * 100));
+            document.getElementById('bar-left').style.width = percentL + '%';
+            document.getElementById('bar-right').style.width = percentR + '%';
+
+            // Update Sensor Status Box (Top Left Canvas)
+            const sensorBox = document.getElementById('sensor-display');
+            sensorBox.innerHTML = '';
+            for(let i=0; i<robot.numSensors; i++) {
+                let div = document.createElement('div');
+                div.className = `w-3 h-3 rounded-full border border-gray-300 ${robot.sensorsRaw[i] ? 'bg-red-500' : 'bg-gray-100'}`;
+                sensorBox.appendChild(div);
+            }
+        }
+
+        function resetRobot() {
+            robot.x = START_POS.x;
+            robot.y = START_POS.y;
+            robot.theta = START_POS.theta;
+            integral = 0;
+            lastError = 0;
+            robot.sensorsRaw = [0,0,0,0,0,0,0,0];
+            draw();
+            if(!isRunning) updateTelemetryUI(0);
+        }
+
+        // --- MAIN LOOP ---
+        function gameLoop() {
+            updateSimulation();
+            draw();
+            animationId = requestAnimationFrame(gameLoop);
+        }
+
+        function togglePlay() {
+            isRunning = !isRunning;
+            const btn = document.getElementById('btn-play');
+            if (isRunning) {
+                btn.innerText = "Pause";
+                btn.classList.replace('bg-blue-600', 'bg-red-500');
+                btn.classList.replace('hover:bg-blue-500', 'hover:bg-red-400');
+                btn.classList.replace('shadow-[0_0_10px_rgba(59,130,246,0.5)]', 'shadow-[0_0_10px_rgba(239,68,68,0.5)]');
+            } else {
+                btn.innerText = "Jalankan";
+                btn.classList.replace('bg-red-500', 'bg-blue-600');
+                btn.classList.replace('hover:bg-red-400', 'hover:bg-blue-500');
+                btn.classList.replace('shadow-[0_0_10px_rgba(239,68,68,0.5)]', 'shadow-[0_0_10px_rgba(59,130,246,0.5)]');
+            }
+        }
+
+        // --- SETUP EVENT LISTENERS ---
+        function setupListeners() {
+            // Slider to Number Bindings
+            const bindParam = (id, objKey, callback) => {
+                const slider = document.getElementById(`slider-${id}`);
+                const num = document.getElementById(`num-${id}`);
+                
+                slider.addEventListener('input', (e) => {
+                    let val = parseFloat(e.target.value);
+                    num.value = val;
+                    if(objKey) window[objKey] = val;
+                    if(callback) callback(val);
+                });
+                
+                num.addEventListener('input', (e) => {
+                    let val = parseFloat(e.target.value);
+                    if(!isNaN(val)) {
+                        slider.value = val;
+                        if(objKey) window[objKey] = val;
+                        if(callback) callback(val);
+                    }
+                });
+            };
+
+            bindParam('kp', 'Kp');
+            bindParam('ki', 'Ki');
+            bindParam('kd', 'Kd');
+            
+            const speedSlider = document.getElementById('slider-speed');
+            speedSlider.addEventListener('input', (e) => {
+                robot.baseSpeed = parseInt(e.target.value);
+                document.getElementById('lbl-speed').innerText = robot.baseSpeed;
+            });
+
+            document.getElementById('btn-play').addEventListener('click', togglePlay);
+            document.getElementById('btn-reset').addEventListener('click', resetRobot);
+        }
+
+        // --- INISIALISASI ---
+        window.onload = () => {
+            initTrack();
+            setupListeners();
+            resetRobot();
+            
+            // Render frame pertama
+            draw();
+            
+            // Start the loop (but it won't move until isRunning = true)
+            gameLoop();
+        };
+
+    </script>
+</body>
+</html>
